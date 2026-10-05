@@ -27,6 +27,14 @@
       "default": "block",
       "options": ["block", "regex-only"]
     },
+    "detectionScope": {
+      "type": "string",
+      "title": "Detection scope",
+      "description": "\"full\" (default): engine-written text (skill listings, MCP instructions, system prompt sections) is checked by Gemma too. \"fast\": that text is masked by regex and known values only, so the first request fits the 30-second fetch limit more easily, but names inside user-written skill descriptions pass through.",
+      "required": false,
+      "default": "full",
+      "options": ["full", "fast"]
+    },
     "images": {
       "type": "string",
       "title": "Images and documents",

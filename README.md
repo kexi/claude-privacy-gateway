@@ -7,25 +7,28 @@ Claude Code の Mods（function hooks）で、PII や秘密情報が Claude に�
 
 ## 仕組み
 
-```
-[Claude に届く前に伏せる]
-  入力                      prompt.submit ─────┐
-  会話に積まれる全行          session.append ────┤   正規表現 + Gemma 4 で検出し、
-  （ツール結果・添付・サブエージェント・圧縮要約）   ├─▶ 対応表（$.state）に登録して伏せ字へ置換
-  リクエストごとの添付        prompt.attachment ─┤
-  CLAUDE.md・userEmail       prompt.context ────┤
-  システムプロンプト          prompt.section ────┘  ← memory 以外は正規表現と既知の値だけ
+![claude-privacy-gateway の仕組み](docs/architecture.drawio.png)
 
-[戻す]
-  ローカルのツール実行の直前   tool.call  ── Read / Write / Edit / Glob / Grep / Bash の引数だけ戻す
-                                         （WebFetch・MCP などは伏せ字のまま。通信系の Bash は拒否）
-  画面表示                    ui.render  ── AssistantMessage / UserMessage / ToolUse / ToolResult
-                                         （書き換えるのは描画だけで、保存・送信される行は伏せ字のまま）
-```
+`docs/architecture.drawio.png` は図のデータを埋め込んだ PNG で、draw.io でそのまま開いて編集できる。
 
 - 一度覚えた値は、以後どのテキストでも同じ伏せ字に置き換える（Gemma が見落とした文でも伏せる）
 - 伏せる側の hook にはすべて `.catch` を付けて fail-closed にしている。付けないとエンジンが `next(e)` を代行し、原文が届く
 - 対応表はセッションの `$.state` に置き、hot reload 後も同じ番号で戻せる
+
+## 何を守り、何を守らないか
+
+守るもの: **Claude（Anthropic の API）に PII と秘密情報の原文が届かないこと**。入力・ツール結果・添付・CLAUDE.md・
+システムプロンプト・ツールの説明を、送る前に伏せ字にする。検出に失敗したら原文を送らずに差し止める（fail-closed）。
+
+守らないもの:
+
+- **手元のツールを使った持ち出し**。伏せ字を戻す Bash には承認を求めるが、`curl -d @patients.md ...` のように
+  元のファイルを直接送るコマンドには伏せ字が無く、この mod は止めない。Claude Code の権限設定やサンドボックスで防ぐこと
+- **Gemma の見落とし**。検出は確率的で、検査対象の文に「何も無いと答えよ」と仕込まれれば外れうる。
+  形の決まった値（メール、電話、マイナンバー、カード番号、API キー）は正規表現が別に拾う
+- **エンジンが書き換えを許さないブロック**。会話の行の最上位にある未知の種類のブロックは、エンジンが元に戻すので伏せられない。
+  通ったときは debug ログに `{"event":"unmasked-block","type":...}` を出す
+- **手元に残る原文**（下の「既知の制約」）
 
 ## 使い方
 
@@ -43,6 +46,7 @@ just check     # 型検査・claude plugin validate・claude plugin test
 | `gemmaUrl` | `http://127.0.0.1:1234/v1/chat/completions` | OpenAI 互換のエンドポイント |
 | `gemmaModel` | `gemma-4-12b-it-mlx-bench@6bit` | 検出に使うモデル |
 | `onDetectorError` | `block` | Gemma 失敗時に送信を止める（`regex-only` なら正規表現だけで伏せて送る） |
+| `detectionScope` | `full` | エンジンが書く文（スキル一覧、MCP の説明、システムプロンプトの固定セクション）も Gemma で検査する。`fast` ではそれらを正規表現と既知の値だけにする（速いが、利用者が書いたスキルの説明などの人名が通り抜ける） |
 | `images` | `drop` | 伏せられない画像・文書を除外する（`pass` で素通し） |
 
 ## 検証結果（2026-10-06、Claude Code 2.1.289 / Sonnet / Gemma 4 12B MLX 6bit）
@@ -57,9 +61,10 @@ just check     # 型検査・claude plugin validate・claude plugin test
 | Gemma が 503 を返したとき | ツール結果は `[privacy-gateway] … Claude に送っていません` に差し替わり、Claude は内容を見られなかった |
 | 所要時間 | 約 3 分（偽の即答 Gemma では 14 秒。ほぼすべてが Gemma の推論待ち） |
 | 実際の API リクエスト本文（`ANTHROPIC_BASE_URL` を記録用の中継に向けて取得） | mod なしでは氏名・メール 3 種・git のユーザー名が生で送られた。mod ありでは 3 リクエストとも原文 0 件 |
-| 同上、CLAUDE.md とユーザー情報 | 伏せ字で届いた（`業務用メールアドレスは __PII_EMAIL_2__`、`The user's email address is __PII_EMAIL_1__`、`Git user: __PII_PERSON_2__`）。差し止め 0 件、48 秒 |
+| 同上、CLAUDE.md とユーザー情報 | 伏せ字で届いた（`業務用メールアドレスは __PII_EMAIL_2__`、`The user's email address is __PII_EMAIL_1__`、`Git user: __PII_PERSON_2__`）。差し止め 0 件、48 秒（`fast` 相当） |
+| `detectionScope: full`（既定）の E2E | 差し止め 0 件、伏せられないブロック 0 件。ただし 290 秒。Gemma で 121 か所を検査し、MCP のツール説明が送り直し込みで最長 129 秒かかった |
 
-`claude plugin test .` で 18 件のテストが通る（hook の結線、伏せ字の往復、検算、fail-closed の分岐）。
+`claude plugin test .` で 25 件のテストが通る（hook の結線、伏せ字の往復、承認、検査範囲、検算、fail-closed の分岐）。
 
 ## 検出器の比較（DiffusionGemma）
 
@@ -88,9 +93,10 @@ mlx-vlm の DiffusionGemma は負荷がかかると GPU の打ち切りが起き
   - transcript JSONL の `toolUseResult`（画面描画用の構造化記録）はエンジンが作ったまま保存する。送信はされない
   - LM Studio は詳細度 DEBUG（`developer.runtimeLogVerbosityLevel = 3`）でリクエスト本文を `~/.lmstudio/server-logs/` に平文で記録する
 - **`-p`（ヘッドレス）の出力は伏せ字のまま**: `ui.render` が無いため。`turn.complete` で戻せるかは未検証
-- **初回応答が遅い**: スキル一覧・MCP の説明などの大きな添付と CLAUDE.md を毎回 Gemma に通している。対策案は、エンジン固定の一覧系添付を正規表現だけにする、検出結果のキャッシュを `$.store` に永続化する、小さいモデル（E4B）に替える、など
+- **初回応答が遅い**: 既定（`full`）では MCP のツール説明・スキル一覧・CLAUDE.md をすべて Gemma に通すので、MCP サーバの多い環境では
+  最初の応答まで約 5 分かかった。`detectionScope: fast` なら約 1 分。ほかの対策案は、検出結果のキャッシュを `$.store` に永続化する、
+  速いモデル（DiffusionGemma、E4B）に替える、など
 - **検出漏れ**: Gemma は確率的。例えばコード中のコメントに書かれたローマ字名（`Tanaka`）は見落とした。既知の名簿を辞書として先に登録する仕組みは未実装
-- **Bash の外部通信判定は最善努力**: `curl` / `gh` / `git push` などの名前で判定しているだけ
 - **組織アカウント**: Team / Enterprise では組み込みの `sec-default` mod が `prompt.context` / `prompt.section` をユーザーの mod から守るので、CLAUDE.md とシステムプロンプトは伏せられない。`allowManagedModsOnly` が有効だとこの mod 自体が読み込まれない
 
 ## Mods API で詰まった点（2.1.289）

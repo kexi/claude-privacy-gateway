@@ -22,8 +22,7 @@ describe('message', () => {
         { type: 'text', text: `${NAME}さんの記録` },
         { type: 'tool_result', tool_use_id: 'toolu_read', content: `担当: ${NAME}\n電話: 090-1234-5678` },
       ]),
-      text => gateway.mask(port, text),
-      'drop',
+      { mask: text => gateway.mask(port, text), images: 'drop', onUnmasked: () => {} },
     )
 
     expect(masked.content).toEqual([
@@ -50,11 +49,32 @@ describe('message', () => {
 
     const masked = await maskMessage(
       row([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }]),
-      text => gateway.mask(portFinding([]), text),
-      'drop',
+      { mask: text => gateway.mask(portFinding([]), text), images: 'drop', onUnmasked: () => {} },
     )
 
     expect(JSON.stringify(masked)).not.toContain('AAAA')
+  })
+
+  test('tool_result の中の知らない種類は伏せてから渡し、最上位の知らない種類は伏せられないことを知らせる', async () => {
+    const gateway = createGateway(settingsOf({}))
+    const port = portFinding([NAME])
+    const unmasked: string[] = []
+
+    const masked = await maskMessage(
+      row([
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu_search',
+          content: [{ type: 'search_result', title: `${NAME}さんの記録`, source: 'local' }],
+        },
+        { type: 'container_upload', file_id: 'file_1' },
+      ]),
+      { mask: text => gateway.mask(port, text), images: 'drop', onUnmasked: type => unmasked.push(type) },
+    )
+
+    expect(JSON.stringify(masked)).not.toContain(NAME)
+    expect(JSON.stringify(masked)).toContain('__PII_PERSON_1__')
+    expect(unmasked).toEqual(['container_upload'])
   })
 
   test('検出に失敗した行は、原文を残さず tool_result の対応だけ保つ', () => {

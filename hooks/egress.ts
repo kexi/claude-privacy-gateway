@@ -21,15 +21,24 @@ export function isLocalTool(tool: string): boolean {
 }
 
 /**
- * 外部と通信しうるコマンドの目安。Bash は何でも実行できるため、ここは最善努力の網でしかない。
+ * 伏せ字を戻して実行する前に、利用者の承認を求めるツール。Bash は何でも実行でき、外部へも送れる。
+ *
+ * Why not コマンド名で外部通信を判定して拒否する: `/usr/bin/curl`、`python3 -c '...urllib...'`、
+ * `node -e 'fetch(...)'` など書き方はいくらでもあり、名前の拒否リストではすり抜けを防げない
+ * （2026-10-06 のセキュリティレビューの指摘）。
  */
-const NETWORK_COMMAND =
-  /(^|[\s;&|(`$])(curl|wget|http|https|xh|gh|ssh|scp|sftp|rsync|nc|ncat|telnet|ftp|aws|gcloud|az|mail|sendmail)(?=\s|$)|\bgit\s+(push|send-email)\b|\b(npm|pnpm|yarn|bun)\s+publish\b|\bdocker\s+push\b/
+const APPROVAL_TOOLS = new Set(['Bash'])
 
-export function isNetworkBoundCommand(command: string): boolean {
-  return NETWORK_COMMAND.test(command)
+export function needsApproval(tool: string): boolean {
+  return APPROVAL_TOOLS.has(tool)
 }
 
-export const NETWORK_DENIAL =
-  'privacy-gateway: 外部と通信しうるコマンドに伏せ字（__PII_*__）が含まれているため、元の値に戻して実行することはできません。' +
-  '伏せ字を含まない形で実行するか、ユーザー自身に実行を依頼してください。'
+/**
+ * 承認ダイアログに出す理由。
+ *
+ * Why not 戻した後のコマンドをそのまま見せる: この理由はオートモードの判定器（Claude）にも渡りうるので、
+ * 元の値を入れると Claude に PII が届く。伏せ字のまま、戻すことだけを知らせる。
+ */
+export const APPROVAL_REASON =
+  'privacy-gateway: このコマンドに含まれる伏せ字（__PII_…__）を元の値に戻して実行します。' +
+  '値が外部に送られないことを確かめてから許可してください。'

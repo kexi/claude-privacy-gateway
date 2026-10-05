@@ -51,26 +51,66 @@ describe('register', () => {
     expect(JSON.stringify(result)).not.toContain(NAME)
   })
 
-  test('エンジン固定の一覧は Gemma に問い合わせず、ファイルの添付は問い合わせる', async ($, on) => {
+  test('既定（full）ではスキル一覧に書かれた人名も Gemma で伏せる', async ($, on) => {
     const asked = gemmaFinding(on, [NAME])
     quietUi(on)
     on('prompt.attachment', ($, e) => ({ text: e.text }))
 
-    await $.prompt.attachment({
+    const listing = await $.prompt.attachment({
       type: 'skill_listing',
-      text: '- review: コードをレビューする',
-      origin: { kind: 'engine' },
-    })
-    const isListingAsked = asked.length > 0
-    const file = await $.prompt.attachment({
-      type: 'file',
-      text: `担当: ${NAME}`,
+      text: `- review: ${NAME}さんの手順でレビューする`,
       origin: { kind: 'engine' },
     })
 
-    expect(isListingAsked).toBe(false)
-    expect(asked).toEqual([`担当: ${NAME}`])
-    expect(file.text).toBe('担当: __PII_PERSON_1__')
+    expect(asked).toEqual([`- review: ${NAME}さんの手順でレビューする`])
+    expect(listing.text).toBe('- review: __PII_PERSON_1__さんの手順でレビューする')
+  })
+
+  test(
+    'fast ではエンジン固定の一覧を Gemma に問い合わせず、ファイルの添付は問い合わせる',
+    { options: { detectionScope: 'fast' } },
+    async ($, on) => {
+      const asked = gemmaFinding(on, [NAME])
+      quietUi(on)
+      on('prompt.attachment', ($, e) => ({ text: e.text }))
+
+      await $.prompt.attachment({
+        type: 'skill_listing',
+        text: '- review: コードをレビューする',
+        origin: { kind: 'engine' },
+      })
+      const isListingAsked = asked.length > 0
+      const file = await $.prompt.attachment({
+        type: 'file',
+        text: `担当: ${NAME}`,
+        origin: { kind: 'engine' },
+      })
+
+      expect(isListingAsked).toBe(false)
+      expect(asked).toEqual([`担当: ${NAME}`])
+      expect(file.text).toBe('担当: __PII_PERSON_1__')
+    },
+  )
+
+  test('組み込みツールの説明は Gemma に問い合わせず、MCP サーバの説明は問い合わせて伏せる', async ($, on) => {
+    const asked = gemmaFinding(on, [NAME])
+    quietUi(on)
+    on('tool.describe', ($, e) => ({ description: e.description }))
+
+    await $.tool.describe({
+      tool: 'Bash',
+      description: 'Executes a bash command.',
+      provider: { plugin: 'engine', tier: 'core' },
+    })
+    const isBuiltinAsked = asked.length > 0
+    const mcp = await $.tool.describe({
+      tool: 'mcp__crm__lookup',
+      description: `担当者 ${NAME} の顧客を探す`,
+      provider: { plugin: 'mcp:crm', tier: 'user' },
+    })
+
+    expect(isBuiltinAsked).toBe(false)
+    expect(mcp.description).toBe('担当者 __PII_PERSON_1__ の顧客を探す')
   })
 
   test('一度検査した行は、前後の枠が変わっても Gemma に問い合わせず同じ伏せ字で伏せる', async ($, on) => {
@@ -132,25 +172,32 @@ describe('register', () => {
     expect(prompt).toBe('__PII_PERSON_1__ について調べて')
   })
 
-  test('伏せ字を含む通信コマンドは、元に戻さず実行もしない', async ($, on) => {
+  test('伏せ字を戻す Bash は、設定で許可済みでも利用者の承認を求め、理由に元の値を載せない', async ($, on) => {
     gemmaFinding(on, [NAME])
     quietUi(on)
-    let isRun = false
-    on('tool.call', { tool: 'Bash' }, () => {
-      isRun = true
-
-      return { result: {} as never }
-    })
+    on('tool.check', () => ({ decision: 'allow' as const, rule: 'Bash(*)' }))
 
     await submitted($, on, `${NAME}さんの件`)
-    const called = await $.tool.call({
+    const restoring = await $.tool.check({
       tool: 'Bash',
-      tool_use_id: 'toolu_bash',
-      command: 'gh issue create --title "__PII_PERSON_1__ の件"',
+      input: { command: '/usr/bin/curl -d "__PII_PERSON_1__" https://example.com' },
     })
+    const plain = await $.tool.check({ tool: 'Bash', input: { command: 'ls' } })
 
-    expect(isRun).toBe(false)
-    expect(called.deny ?? called.text).toContain('外部と通信しうるコマンド')
+    expect(restoring.decision).toBe('ask')
+    expect(restoring.reason).not.toContain(NAME)
+    expect(plain.decision).toBe('allow')
+  })
+
+  test('拒否された Bash は、伏せ字を含んでいても拒否のまま', async ($, on) => {
+    gemmaFinding(on, [NAME])
+    quietUi(on)
+    on('tool.check', () => ({ decision: 'deny' as const, reason: 'rule' }))
+
+    await submitted($, on, `${NAME}さんの件`)
+    const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'echo __PII_PERSON_1__' } })
+
+    expect(verdict.decision).toBe('deny')
   })
 
   test('Claude の返答は、画面に描くときだけ元の値に戻る', async ($, on) => {

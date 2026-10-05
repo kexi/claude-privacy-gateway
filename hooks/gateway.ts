@@ -30,7 +30,15 @@ export type Settings = {
    */
   isFailClosed: boolean
   images: ImagePolicy
+  /**
+   * `full`: エンジン固定の文章（スキル一覧、システムプロンプトの固定セクションなど）も Gemma で検査する。
+   * `fast`: それらは正規表現と既知の値の置き換えだけにする。起動直後の検査が `$.http.fetch` の 30 秒の
+   * 上限に収まりやすいが、利用者の書いたスキルの説明などに入った人名は通り抜ける。
+   */
+  scope: DetectionScope
 }
+
+export type DetectionScope = 'full' | 'fast'
 
 export function settingsOf(options: PluginOptions): Settings {
   const stringOf = (key: string, fallback: string) => {
@@ -47,6 +55,7 @@ export function settingsOf(options: PluginOptions): Settings {
     },
     isFailClosed: stringOf('onDetectorError', 'block') === 'block',
     images: stringOf('images', 'drop') === 'pass' ? 'pass' : 'drop',
+    scope: stringOf('detectionScope', 'full') === 'fast' ? 'fast' : 'full',
   }
 }
 

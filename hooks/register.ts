@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { APPROVAL_REASON, isLocalTool, needsApproval } from './egress'
+import { APPROVAL_REASON, NETWORK_DENIAL, isLocalTool, isNetworkBoundCommand, needsApproval } from './egress'
 import { createGateway, settingsOf, type DetectionScope, type MaskDepth, type Port } from './gateway'
 import { containsToken, unmaskDeep, unmaskText } from './mask'
 import { BLOCKED_TEXT, blockedMessage, maskMessage } from './message'
@@ -271,7 +271,12 @@ export const register: Register = (on, options) => {
     const isRestorable = isLocalTool(e.tool) && containsToken(e)
     if (!isRestorable) return next(e)
 
-    return next(unmaskDeep(e, gateway.vault))
+    const restored = unmaskDeep(e, gateway.vault)
+    // 承認はオートモードの判定器が下すこともあるので、通信系に見えるコマンドには承認に関わらず戻さない
+    const isNetworkBash = restored.tool === 'Bash' && isNetworkBoundCommand(restored.command)
+    if (isNetworkBash) return { deny: NETWORK_DENIAL }
+
+    return next(restored)
   }).catch(() => ({ deny: RESTORE_FAILED }))
 
   // ---- 画面に描くときだけ戻す（保存・送信される行は伏せ字のまま） ----

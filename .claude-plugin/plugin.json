@@ -1,0 +1,39 @@
+{
+  "name": "privacy-gateway",
+  "version": "0.1.0",
+  "description": "PII and secrets are swapped for placeholders (__PII_PERSON_1__) by regex and a local Gemma 4 before anything reaches Claude; placeholders are restored only where the work stays on this machine (local tool calls) and on screen.",
+  "author": { "name": "Kei Nakayama" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "gemmaUrl": {
+      "type": "string",
+      "title": "Gemma endpoint",
+      "description": "OpenAI-compatible chat completions endpoint of the local model (LM Studio, mlx_lm.server).",
+      "required": false,
+      "default": "http://127.0.0.1:1234/v1/chat/completions"
+    },
+    "gemmaModel": {
+      "type": "string",
+      "title": "Gemma model",
+      "description": "Model identifier the endpoint serves.",
+      "required": false,
+      "default": "gemma-4-12b-it-mlx-bench@6bit"
+    },
+    "onDetectorError": {
+      "type": "string",
+      "title": "When Gemma fails",
+      "description": "\"block\" (default): the content is not sent to Claude. \"regex-only\": the content is sent masked by the regex detectors alone.",
+      "required": false,
+      "default": "block",
+      "options": ["block", "regex-only"]
+    },
+    "images": {
+      "type": "string",
+      "title": "Images and documents",
+      "description": "\"drop\" (default): image and document blocks are removed, since they cannot be masked. \"pass\": they are sent as they are.",
+      "required": false,
+      "default": "drop",
+      "options": ["drop", "pass"]
+    }
+  }
+}

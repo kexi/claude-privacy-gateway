@@ -1,0 +1,13 @@
+{
+  "name": "claude-privacy-gateway",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,3 @@
+node_modules/
+# エンジンが mod を読み込むたびに書き出す型定義（Claude Code のバージョンごとに変わる）
+.claude-plugin/types/

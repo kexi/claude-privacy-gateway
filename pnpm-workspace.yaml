@@ -1,0 +1,9 @@
+# 公開から 1 日（1440 分）未満のパッケージは入れない（サプライチェーン攻撃対策）
+minimumReleaseAge: 1440
+# 依存パッケージのライフサイクルスクリプトは allowBuilds で許可したものだけ動かす
+strictDepBuilds: true
+allowBuilds: {}
+# 信頼レベルが下がった版（署名や provenance を失った版）を検出する
+trustPolicy: no-downgrade
+# npm レジストリ外（git、tarball URL）からの間接依存を拒否する
+blockExoticSubdeps: true

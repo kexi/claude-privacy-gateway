@@ -35,6 +35,14 @@
       "default": "full",
       "options": ["full", "fast"]
     },
+    "bashRestore": {
+      "type": "string",
+      "title": "Restore placeholders in Bash",
+      "description": "\"off\" (default): a Bash command that contains placeholders is refused, so real values never reach the shell. \"with-approval\": placeholders are restored after the user approves each command, and commands that look network-bound are refused by name (best effort: quoting and variable expansion can slip past it).",
+      "required": false,
+      "default": "off",
+      "options": ["off", "with-approval"]
+    },
     "images": {
       "type": "string",
       "title": "Images and documents",

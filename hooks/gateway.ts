@@ -36,9 +36,15 @@ export type Settings = {
    * 上限に収まりやすいが、利用者の書いたスキルの説明などに入った人名は通り抜ける。
    */
   scope: DetectionScope
+  /**
+   * `off`: 伏せ字を含む Bash は戻さずに拒否する。`with-approval`: 毎回の承認を経て戻す。
+   */
+  bashRestore: BashRestore
 }
 
 export type DetectionScope = 'full' | 'fast'
+
+export type BashRestore = 'off' | 'with-approval'
 
 export function settingsOf(options: PluginOptions): Settings {
   const stringOf = (key: string, fallback: string) => {
@@ -56,6 +62,7 @@ export function settingsOf(options: PluginOptions): Settings {
     isFailClosed: stringOf('onDetectorError', 'block') === 'block',
     images: stringOf('images', 'drop') === 'pass' ? 'pass' : 'drop',
     scope: stringOf('detectionScope', 'full') === 'fast' ? 'fast' : 'full',
+    bashRestore: stringOf('bashRestore', 'off') === 'with-approval' ? 'with-approval' : 'off',
   }
 }
 

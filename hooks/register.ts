@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import { APPROVAL_REASON, NETWORK_DENIAL, isLocalTool, isNetworkBoundCommand, needsApproval } from './egress'
+import { APPROVAL_REASON, BASH_DENIAL, BASH_TOOL, NETWORK_DENIAL, isLocalTool, isNetworkBoundCommand } from './egress'
 import { createGateway, settingsOf, type DetectionScope, type MaskDepth, type Port } from './gateway'
 import { containsToken, unmaskDeep, unmaskText } from './mask'
 import { BLOCKED_TEXT, blockedMessage, maskMessage } from './message'
@@ -81,7 +81,7 @@ function sectionDepth(scope: DetectionScope, name: string): MaskDepth {
  * 伏せる: prompt.submit（入力）/ session.append（会話に積まれる全行）/ prompt.attachment・
  *   prompt.context・prompt.section・tool.describe（リクエストごとに組み立てられる添付・CLAUDE.md・
  *   システムプロンプト・ツールの説明）
- * 戻す: tool.call（ローカルツールの引数。Bash は tool.check で承認を求めてから）/
+ * 戻す: tool.call（ローカルツールの引数。Bash は既定で戻さず、bashRestore: with-approval なら tool.check で承認を求めてから）/
  *   ui.render（表示だけ。保存される行は伏せ字のまま）
  *
  * 伏せる側の hook には必ず .catch を付ける。付けないと失敗時にエンジンが next(e) を代行し、
@@ -253,27 +253,33 @@ export const register: Register = (on, options) => {
 
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
-    const isRestoringCommand = needsApproval(e.tool) && containsToken(e.input)
+    const isBashWithToken = e.tool === BASH_TOOL && containsToken(e.input)
     const isDenied = verdict.decision === 'deny'
-    if (!isRestoringCommand || isDenied) return verdict
+    if (!isBashWithToken || isDenied) return verdict
+    if (settings.bashRestore === 'off') return { decision: 'deny', reason: BASH_DENIAL }
 
     // 設定で許可済みのコマンドでも、元の値に戻して実行するなら毎回確かめる
     return { decision: 'ask', reason: APPROVAL_REASON }
   }).catch(($, e, next) => {
-    const isRestoringCommand = needsApproval(e.tool) && containsToken(e.input)
-    if (!isRestoringCommand) return next(e)
+    const isBashWithToken = e.tool === BASH_TOOL && containsToken(e.input)
+    if (!isBashWithToken) return next(e)
 
-    return { decision: 'ask', reason: APPROVAL_REASON }
+    return { decision: 'deny', reason: BASH_DENIAL }
   })
 
   on('tool.call', async ($, e, next) => {
     await gateway.ready(() => read($, VAULT))
-    const isRestorable = isLocalTool(e.tool) && containsToken(e)
-    if (!isRestorable) return next(e)
+    const hasPlaceholder = containsToken(e)
+    if (!hasPlaceholder) return next(e)
+    if (isLocalTool(e.tool)) return next(unmaskDeep(e, gateway.vault))
+    if (e.tool !== BASH_TOOL) return next(e)
+
+    // tool.check を経ない呼び出しもあるので、ここでも既定（off）の Bash には戻さない
+    if (settings.bashRestore === 'off') return { deny: BASH_DENIAL }
 
     const restored = unmaskDeep(e, gateway.vault)
     // 承認はオートモードの判定器が下すこともあるので、通信系に見えるコマンドには承認に関わらず戻さない
-    const isNetworkBash = restored.tool === 'Bash' && isNetworkBoundCommand(restored.command)
+    const isNetworkBash = restored.tool === BASH_TOOL && isNetworkBoundCommand(restored.command)
     if (isNetworkBash) return { deny: NETWORK_DENIAL }
 
     return next(restored)
